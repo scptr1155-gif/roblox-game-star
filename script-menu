@@ -1,1 +1,180 @@
+-- script-menu | SCRIPT MENÜSÜ (v1.0)  -> roblox-game-star deposuna "script-menu" adıyla yükle
+-- =========================================================
+-- Hub'da AÇ'a basılınca loading gösterilir, bu dosya indirilip çalışır ve open(ctx, entry) çağrılır.
+-- Menü: script bilgisi + ÇALIŞTIR + İYİ / KÖTÜ oy (kullanıcı başına 1 oy, tekrar basınca geri alınır).
 
+local G = (type(getgenv) == "function" and getgenv()) or _G
+local S = G.__LOADSYS or {}
+G.__LOADSYS = S
+
+local BASE = "https://raw.githubusercontent.com/scptr1155-gif/loadsystem/refs/heads/main/"
+
+local function loadCore()
+  if type(S.CORE) == "table" then return S.CORE end
+  local ok, src = pcall(function() return game:HttpGet(BASE .. "hubcore?t=" .. tostring(os.time())) end)
+  if not ok or type(src) ~= "string" or type(loadstring) ~= "function" then return nil end
+  local fn = loadstring(src)
+  if not fn then return nil end
+  local okR, c = pcall(fn)
+  if okR and type(c) == "table" then return c end
+  return nil
+end
+
+local STR = {
+  tr = {
+    by = "yazar", run = "ÇALIŞTIR", good = "👍 İYİ", bad = "👎 KÖTÜ", nodesc = "Açıklama yok",
+    run_ok = "Script çalıştırıldı.", run_fail = "Çalıştırılamadı: ", voting = "Oy kaydediliyor...",
+    vote_ok = "Oyun kaydedildi.", vote_undo = "Oyun geri alındı.", vote_fail = "Oy verilemedi: ",
+    hint = "Her kullanıcı 1 oy verir; aynı düğmeye tekrar basarsan oyu geri alırsın.",
+  },
+  en = {
+    by = "by", run = "RUN", good = "👍 GOOD", bad = "👎 BAD", nodesc = "No description",
+    run_ok = "Script executed.", run_fail = "Could not run: ", voting = "Saving vote...",
+    vote_ok = "Vote saved.", vote_undo = "Vote removed.", vote_fail = "Could not vote: ",
+    hint = "One vote per user; press the same button again to remove your vote.",
+  },
+}
+
+local M = {}
+
+function M.open(ctx, entry)
+  ctx = ctx or {}
+  if type(entry) ~= "table" then return end
+  local core = loadCore()
+  if not core then print("[script-menu] hubcore yuklenemedi") return end
+  local lang = (ctx.lang == "en") and "en" or "tr"
+  local function T(k) return STR[lang][k] or STR.tr[k] or k end
+  local spawn, num = core.spawn, core.num
+  local uid = core.userId()
+  local id = math.floor(num(entry.id))
+
+  local function finish()
+    local cb = ctx.onClose
+    if type(cb) == "function" then pcall(cb) end
+  end
+
+  local u = core.ui(ctx, { name = "ScriptMenu", title = tostring(entry.name or "?"), w = 520, h = 440, order = 900, noMin = true })
+  if not u then return end
+  local C, FNT = u.C, u.FNT
+  local PAD, IW = u.PAD, u.IW
+  u.title.Size = UDim2.fromOffset(400, 42)
+  u.title.TextTruncate = Enum.TextTruncate.AtEnd
+  u.title.TextSize = 20
+
+  u.xBtn.MouseButton1Click:Connect(function()
+    u.close()
+    finish()
+  end)
+
+  -- Bilgi
+  local thumb = u.new("ImageLabel", {
+    Size = UDim2.fromOffset(84, 84), Position = UDim2.fromOffset(PAD, 80), BackgroundColor3 = C.cardHi,
+    BorderSizePixel = 0, ScaleType = Enum.ScaleType.Crop, ZIndex = 4,
+  }, u.window)
+  u.round(thumb, 12)
+  local img = tonumber(entry.image)
+  if img and img > 0 then core.safe(function() thumb.Image = "rbxassetid://" .. tostring(math.floor(img)) end) end
+
+  u.label(u.window, T("by") .. " " .. tostring(entry.author or "?"), PAD + 98, 84, IW - 98, 20, 14, FNT.bold, C.text,
+    { TextTruncate = Enum.TextTruncate.AtEnd })
+  u.label(u.window, "ID " .. core.pad(id), PAD + 98, 106, IW - 98, 16, 11, FNT.med, C.muted)
+  local stats = u.label(u.window, "", PAD + 98, 128, IW - 98, 20, 13, FNT.med, C.text)
+
+  local d = tostring(entry.desc or "")
+  if d == "" then d = T("nodesc") end
+  u.label(u.window, d, PAD, 180, IW, 70, 12, FNT.reg, C.muted,
+    { TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top })
+
+  -- Oy durumu
+  local votes = (type(entry.votes) == "table") and entry.votes or {}
+  local mine = tonumber(votes[tostring(uid)])
+  local good, bad, uses = math.floor(num(entry.good)), math.floor(num(entry.bad)), math.floor(num(entry.uses))
+
+  local runBtn = u.pill(T("run"), PAD, 262, IW, 52, true)
+  runBtn.TextSize = 15
+  local half = math.floor((IW - 12) / 2)
+  local goodBtn = u.pill(T("good"), PAD, 326, half, 48, false)
+  local badBtn = u.pill(T("bad"), PAD + half + 12, 326, half, 48, false)
+  goodBtn.TextSize, badBtn.TextSize = 13, 13
+  u.label(u.window, T("hint"), PAD, 392, IW, 30, 11, FNT.reg, C.faint, { TextWrapped = true })
+
+  local function refreshUI()
+    stats.Text = "👍 " .. good .. "    👎 " .. bad .. "    ▶ " .. uses
+    u.tw(goodBtn, { BackgroundColor3 = (mine == 1) and C.ok or C.card }, 0.15)
+    u.tw(badBtn, { BackgroundColor3 = (mine == -1) and C.danger or C.card }, 0.15)
+  end
+  refreshUI()
+
+  -- Çalıştır
+  local running = false
+  runBtn.MouseButton1Click:Connect(function()
+    if running then return end
+    running = true
+    spawn(function()
+      local ok, err = pcall(function()
+        local code = core.httpGet(core.STORE .. core.pad(id))
+        if not code then error("kod indirilemedi") end
+        local fn, cerr = loadstring(code)
+        if not fn then error(cerr) end
+        fn()
+      end)
+      running = false
+      if not u.alive() then return end
+      if ok then
+        u.toast(T("run_ok"), C.ok, 3)
+        uses = uses + 1
+        refreshUI()
+        spawn(function()   -- sayaç arka planda artar
+          core.mutateIndex(function(idx)
+            for _, e in ipairs(idx.scripts) do
+              if num(e.id) == id then e.uses = num(e.uses) + 1 return true end
+            end
+            return false, core.E(lang, "not_found")
+          end, lang)
+        end)
+      else
+        u.toast(T("run_fail") .. tostring(err):sub(1, 90), C.danger, 6)
+      end
+    end)
+  end)
+
+  -- Oy ver (1 = iyi, -1 = kötü)
+  local voting = false
+  local function vote(v)
+    if voting then return end
+    voting = true
+    u.toast(T("voting"), C.muted, 2)
+    spawn(function()
+      local ok, res = core.mutateIndex(function(idx)
+        for _, e in ipairs(idx.scripts) do
+          if num(e.id) == id then
+            local vs = (type(e.votes) == "table") and e.votes or {}
+            local k = tostring(uid)
+            if tonumber(vs[k]) == v then vs[k] = nil else vs[k] = v end
+            local g, b = 0, 0
+            for _, val in pairs(vs) do
+              if tonumber(val) == 1 then g = g + 1 elseif tonumber(val) == -1 then b = b + 1 end
+            end
+            e.votes, e.good, e.bad, e.rating = vs, g, b, g - b
+            return true, { good = g, bad = b, mine = tonumber(vs[k]) }
+          end
+        end
+        return false, core.E(lang, "not_found")
+      end, lang)
+      voting = false
+      if not u.alive() then return end
+      if ok and type(res) == "table" then
+        good, bad, mine = res.good, res.bad, res.mine
+        entry.good, entry.bad = good, bad
+        refreshUI()
+        u.toast(mine and T("vote_ok") or T("vote_undo"), C.ok, 3)
+      else
+        u.toast(T("vote_fail") .. tostring(res), C.danger, 7)
+      end
+    end)
+  end
+  goodBtn.MouseButton1Click:Connect(function() vote(1) end)
+  badBtn.MouseButton1Click:Connect(function() vote(-1) end)
+end
+
+return M
