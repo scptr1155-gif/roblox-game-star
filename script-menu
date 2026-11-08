@@ -1,7 +1,11 @@
--- script-menu | SCRIPT MENÜSÜ (v1.2)  -> roblox-game-star deposuna "script-menu" adıyla yükle
+-- script-menu | SCRIPT MENÜSÜ (v1.3)  -> roblox-game-star deposuna "script-menu" adıyla yükle
 -- =========================================================
 -- Hub'da AÇ'a basılınca loading gösterilir, bu dosya indirilip çalışır ve open(ctx, entry) çağrılır.
 -- Menü: script bilgisi + ÇALIŞTIR + İYİ / KÖTÜ oy.
+--
+-- v1.3: İYİMSER YORUM: yazdığın yorum HEMEN kendi ekranında görünür ("gönderiliyor..."), gerçek gönderim arkada yapılır;
+--       başarısız olursa yorum kaybolur ve metin kutuya geri gelir. Silme de hemen görünür, başarısız olursa geri gelir.
+--       ÇALIŞTIR artık hubcore'un korumalı çalıştırıcısını kullanır (script hatası menüyü/oyunu düşürmez).
 --
 -- v1.2: YORUMLAR eklendi. Menüdeki YORUMLAR tuşu yorum ekranını açar: herkes yorum yazar, yorumu yazan kişi
 --       veya script sahibi yorumu siler. Yorumlar roblox-game-star/comments/<ID>.json içinde durur (hubcore v1.2).
@@ -14,7 +18,7 @@ local S = G.__LOADSYS or {}
 G.__LOADSYS = S
 
 local BASE = "https://raw.githubusercontent.com/scptr1155-gif/loadsystem/refs/heads/main/"
-local NEED = "1.2"
+local NEED = "1.3"
 
 local function loadCore()
   if type(S.CORE) == "table" and S.CORE.version == NEED then return S.CORE end
@@ -36,7 +40,7 @@ local STR = {
     comments = "💬 YORUMLAR", comments_n = "💬 YORUMLAR (%d)", c_back = "← GERİ", c_title = "Yorumlar",
     c_ph = "Yorum yaz...", c_send = "GÖNDER", c_sending = "...", c_empty = "Henüz yorum yok. İlk yorumu sen yaz!",
     c_loading = "Yükleniyor...", c_slow = "Çok hızlı yazıyorsun, biraz bekle.", c_fail = "Yorum gönderilemedi: ",
-    c_del = "SİL", c_del_ok = "Yorum silindi.", c_del_fail = "Silinemedi: ", c_you = "sen", c_owner = "yazar",
+    c_del = "SİL", c_del_ok = "Yorum silindi.", c_del_fail = "Silinemedi: ", c_you = "sen", c_owner = "yazar", c_pending = "gönderiliyor...",
   },
   en = {
     by = "by", run = "RUN", good = "👍 GOOD", bad = "👎 BAD", nodesc = "No description",
@@ -46,7 +50,7 @@ local STR = {
     comments = "💬 COMMENTS", comments_n = "💬 COMMENTS (%d)", c_back = "← BACK", c_title = "Comments",
     c_ph = "Write a comment...", c_send = "SEND", c_sending = "...", c_empty = "No comments yet. Write the first one!",
     c_loading = "Loading...", c_slow = "You are typing too fast, wait a bit.", c_fail = "Could not post: ",
-    c_del = "DEL", c_del_ok = "Comment deleted.", c_del_fail = "Could not delete: ", c_you = "you", c_owner = "author",
+    c_del = "DEL", c_del_ok = "Comment deleted.", c_del_fail = "Could not delete: ", c_you = "you", c_owner = "author", c_pending = "sending...",
   },
 }
 
@@ -172,19 +176,27 @@ function M.open(ctx, entry)
 
   local function deleteComment(cid)
     if cBusy then return end
+    -- HEMEN ekrandan kaldır
+    local pos, removed = nil, nil
+    for i, c in ipairs(comments) do
+      if num(c.id) == num(cid) then pos, removed = i, c break end
+    end
+    if not pos then return end
+    table.remove(comments, pos)
+    setCount()
+    renderComments()
     cBusy = true
     spawn(function()
       local ok, res = core.deleteComment(id, cid, nick, ownerKey, lang)
       cBusy = false
       if not u.alive() then return end
       if ok then
-        for i, c in ipairs(comments) do
-          if num(c.id) == num(cid) then table.remove(comments, i) break end
-        end
-        setCount()
-        renderComments()
         u.toast(T("c_del_ok"), C.ok, 3)
       else
+        -- başarısız: geri koy
+        table.insert(comments, math.min(pos, #comments + 1), removed)
+        setCount()
+        renderComments()
         u.toast(T("c_del_fail") .. tostring(res), C.danger, 6)
       end
     end)
@@ -198,25 +210,27 @@ function M.open(ctx, entry)
       return
     end
     -- en yeni yorum üstte
-    for i = #comments, 1, -1 do
+    local lowest = math.max(1, #comments - 59)
+    for i = #comments, lowest, -1 do
       local c = comments[i]
       local txt = tostring(c.m or "")
       local th = core.textHeight(txt, 13, FNT.reg, IW - 8 - 28)
       local h = math.ceil(th) + 38
       local row = u.new("Frame", {
         Name = "Row", Size = UDim2.fromOffset(IW - 8, h), BackgroundColor3 = C.card, BorderSizePixel = 0,
-        LayoutOrder = #comments - i + 1, ZIndex = 21,
+        LayoutOrder = #comments - i + 1, ZIndex = 21, BackgroundTransparency = c.pending and 0.4 or 0,
       }, cScroll)
       u.round(row, 12)
       u.stroke(row, C.line)
       local who = tostring(c.n or "?")
       if tostring(c.k) == myKey then who = who .. "  ·  " .. T("c_you") end
       if tostring(c.k) == ownerKey then who = who .. "  ·  " .. T("c_owner") end
+      if c.pending then who = who .. "  ·  " .. T("c_pending") end
       u.label(row, who, 12, 6, IW - 8 - 130, 16, 12, FNT.bold, u.accent, { TextTruncate = TRUNC, ZIndex = 22 })
       u.label(row, stamp(c.t), IW - 8 - 130 - 8 - 0, 6, 70, 16, 10, FNT.med, C.faint, { TextXAlignment = AR, ZIndex = 22 })
       u.label(row, txt, 12, 26, IW - 8 - 28, math.ceil(th), 13, FNT.reg, C.text,
         { TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 22 })
-      if tostring(c.k) == myKey or myKey == ownerKey then
+      if not c.pending and (tostring(c.k) == myKey or myKey == ownerKey) then
         local db = u.pill(T("c_del"), IW - 8 - 52, 4, 44, 20, C.danger, row)
         db.TextSize = 10
         db.ZIndex = 23
@@ -256,20 +270,29 @@ function M.open(ctx, entry)
     if os.clock() - lastSend < 3 then u.toast(T("c_slow"), C.muted, 2) return end
     cSending = true
     lastSend = os.clock()
-    sendBtn.Text = T("c_sending")
+    -- HEMEN ekranda göster
+    local tmp = { id = -os.time(), n = nick, k = myKey, m = text, t = os.time(), pending = true }
+    comments[#comments + 1] = tmp
+    inBox.Text = ""
+    setCount()
+    renderComments()
     spawn(function()
       local ok, res = core.addComment(id, nick, text, lang)
       cSending = false
       if not u.alive() then return end
-      sendBtn.Text = T("c_send")
+      local idx = nil
+      for i, c in ipairs(comments) do
+        if c == tmp then idx = i break end
+      end
       if ok and type(res) == "table" then
-        inBox.Text = ""
-        comments[#comments + 1] = res
-        setCount()
-        renderComments()
+        if idx then comments[idx] = res else comments[#comments + 1] = res end
       else
+        if idx then table.remove(comments, idx) end
+        inBox.Text = text
         u.toast(T("c_fail") .. tostring(res), C.danger, 8)
       end
+      setCount()
+      renderComments()
     end)
   end
   sendBtn.MouseButton1Click:Connect(sendComment)
@@ -292,9 +315,8 @@ function M.open(ctx, entry)
       local ok, err = pcall(function()
         local code = core.httpGet(core.STORE .. core.pad(id))
         if not code then error("kod indirilemedi") end
-        local fn, cerr = loadstring(code)
-        if not fn then error(cerr) end
-        fn()
+        local okG, errG = core.runGuarded(code, "script " .. tostring(id))
+        if not okG then error(errG) end
       end)
       running = false
       if not u.alive() then return end
