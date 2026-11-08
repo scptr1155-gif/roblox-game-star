@@ -1,16 +1,20 @@
--- script-menu | SCRIPT MENÜSÜ (v1.0)  -> roblox-game-star deposuna "script-menu" adıyla yükle
+-- script-menu | SCRIPT MENÜSÜ (v1.1)  -> roblox-game-star deposuna "script-menu" adıyla yükle
 -- =========================================================
 -- Hub'da AÇ'a basılınca loading gösterilir, bu dosya indirilip çalışır ve open(ctx, entry) çağrılır.
--- Menü: script bilgisi + ÇALIŞTIR + İYİ / KÖTÜ oy (kullanıcı başına 1 oy, tekrar basınca geri alınır).
+-- Menü: script bilgisi + ÇALIŞTIR + İYİ / KÖTÜ oy.
+--
+-- v1.1: oy artık HER TAKMA AD için 1 tane (anahtar: "n:" + takma ad küçük harf). Aynı düğmeye tekrar basınca oy geri alınır.
+--       Eski sürümde UserId ile verilmiş oylar sayaçta aynen kalır (silinmez), yeni oylar takma ada göre sayılır.
 
 local G = (type(getgenv) == "function" and getgenv()) or _G
 local S = G.__LOADSYS or {}
 G.__LOADSYS = S
 
 local BASE = "https://raw.githubusercontent.com/scptr1155-gif/loadsystem/refs/heads/main/"
+local NEED = "1.1"
 
 local function loadCore()
-  if type(S.CORE) == "table" then return S.CORE end
+  if type(S.CORE) == "table" and S.CORE.version == NEED then return S.CORE end
   local ok, src = pcall(function() return game:HttpGet(BASE .. "hubcore?t=" .. tostring(os.time())) end)
   if not ok or type(src) ~= "string" or type(loadstring) ~= "function" then return nil end
   local fn = loadstring(src)
@@ -25,13 +29,13 @@ local STR = {
     by = "yazar", run = "ÇALIŞTIR", good = "👍 İYİ", bad = "👎 KÖTÜ", nodesc = "Açıklama yok",
     run_ok = "Script çalıştırıldı.", run_fail = "Çalıştırılamadı: ", voting = "Oy kaydediliyor...",
     vote_ok = "Oyun kaydedildi.", vote_undo = "Oyun geri alındı.", vote_fail = "Oy verilemedi: ",
-    hint = "Her kullanıcı 1 oy verir; aynı düğmeye tekrar basarsan oyu geri alırsın.",
+    hint = "Her takma ad 1 oy verir; aynı düğmeye tekrar basarsan oyu geri alırsın.",
   },
   en = {
     by = "by", run = "RUN", good = "👍 GOOD", bad = "👎 BAD", nodesc = "No description",
     run_ok = "Script executed.", run_fail = "Could not run: ", voting = "Saving vote...",
     vote_ok = "Vote saved.", vote_undo = "Vote removed.", vote_fail = "Could not vote: ",
-    hint = "One vote per user; press the same button again to remove your vote.",
+    hint = "One vote per nickname; press the same button again to remove your vote.",
   },
 }
 
@@ -45,7 +49,8 @@ function M.open(ctx, entry)
   local lang = (ctx.lang == "en") and "en" or "tr"
   local function T(k) return STR[lang][k] or STR.tr[k] or k end
   local spawn, num = core.spawn, core.num
-  local uid = core.userId()
+  local nick = core.currentNick(ctx)
+  local voteKey = "n:" .. core.nickKey(nick)
   local id = math.floor(num(entry.id))
 
   local function finish()
@@ -85,9 +90,9 @@ function M.open(ctx, entry)
   u.label(u.window, d, PAD, 180, IW, 70, 12, FNT.reg, C.muted,
     { TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top })
 
-  -- Oy durumu
+  -- Oy durumu (bu takma adın oyu)
   local votes = (type(entry.votes) == "table") and entry.votes or {}
-  local mine = tonumber(votes[tostring(uid)])
+  local mine = tonumber(votes[voteKey])
   local good, bad, uses = math.floor(num(entry.good)), math.floor(num(entry.bad)), math.floor(num(entry.uses))
 
   local runBtn = u.pill(T("run"), PAD, 262, IW, 52, true)
@@ -138,7 +143,7 @@ function M.open(ctx, entry)
     end)
   end)
 
-  -- Oy ver (1 = iyi, -1 = kötü)
+  -- Oy ver (1 = iyi, -1 = kötü) — takma ad başına 1 oy
   local voting = false
   local function vote(v)
     if voting then return end
@@ -149,14 +154,13 @@ function M.open(ctx, entry)
         for _, e in ipairs(idx.scripts) do
           if num(e.id) == id then
             local vs = (type(e.votes) == "table") and e.votes or {}
-            local k = tostring(uid)
-            if tonumber(vs[k]) == v then vs[k] = nil else vs[k] = v end
+            if tonumber(vs[voteKey]) == v then vs[voteKey] = nil else vs[voteKey] = v end
             local g, b = 0, 0
             for _, val in pairs(vs) do
               if tonumber(val) == 1 then g = g + 1 elseif tonumber(val) == -1 then b = b + 1 end
             end
             e.votes, e.good, e.bad, e.rating = vs, g, b, g - b
-            return true, { good = g, bad = b, mine = tonumber(vs[k]) }
+            return true, { good = g, bad = b, mine = tonumber(vs[voteKey]) }
           end
         end
         return false, core.E(lang, "not_found")
