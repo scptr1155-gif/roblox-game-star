@@ -1,7 +1,10 @@
--- script-menu | SCRIPT MENÜSÜ (v1.1)  -> roblox-game-star deposuna "script-menu" adıyla yükle
+-- script-menu | SCRIPT MENÜSÜ (v1.2)  -> roblox-game-star deposuna "script-menu" adıyla yükle
 -- =========================================================
 -- Hub'da AÇ'a basılınca loading gösterilir, bu dosya indirilip çalışır ve open(ctx, entry) çağrılır.
 -- Menü: script bilgisi + ÇALIŞTIR + İYİ / KÖTÜ oy.
+--
+-- v1.2: YORUMLAR eklendi. Menüdeki YORUMLAR tuşu yorum ekranını açar: herkes yorum yazar, yorumu yazan kişi
+--       veya script sahibi yorumu siler. Yorumlar roblox-game-star/comments/<ID>.json içinde durur (hubcore v1.2).
 --
 -- v1.1: oy artık HER TAKMA AD için 1 tane (anahtar: "n:" + takma ad küçük harf). Aynı düğmeye tekrar basınca oy geri alınır.
 --       Eski sürümde UserId ile verilmiş oylar sayaçta aynen kalır (silinmez), yeni oylar takma ada göre sayılır.
@@ -11,7 +14,7 @@ local S = G.__LOADSYS or {}
 G.__LOADSYS = S
 
 local BASE = "https://raw.githubusercontent.com/scptr1155-gif/loadsystem/refs/heads/main/"
-local NEED = "1.1"
+local NEED = "1.2"
 
 local function loadCore()
   if type(S.CORE) == "table" and S.CORE.version == NEED then return S.CORE end
@@ -30,12 +33,20 @@ local STR = {
     run_ok = "Script çalıştırıldı.", run_fail = "Çalıştırılamadı: ", voting = "Oy kaydediliyor...",
     vote_ok = "Oyun kaydedildi.", vote_undo = "Oyun geri alındı.", vote_fail = "Oy verilemedi: ",
     hint = "Her takma ad 1 oy verir; aynı düğmeye tekrar basarsan oyu geri alırsın.",
+    comments = "💬 YORUMLAR", comments_n = "💬 YORUMLAR (%d)", c_back = "← GERİ", c_title = "Yorumlar",
+    c_ph = "Yorum yaz...", c_send = "GÖNDER", c_sending = "...", c_empty = "Henüz yorum yok. İlk yorumu sen yaz!",
+    c_loading = "Yükleniyor...", c_slow = "Çok hızlı yazıyorsun, biraz bekle.", c_fail = "Yorum gönderilemedi: ",
+    c_del = "SİL", c_del_ok = "Yorum silindi.", c_del_fail = "Silinemedi: ", c_you = "sen", c_owner = "yazar",
   },
   en = {
     by = "by", run = "RUN", good = "👍 GOOD", bad = "👎 BAD", nodesc = "No description",
     run_ok = "Script executed.", run_fail = "Could not run: ", voting = "Saving vote...",
     vote_ok = "Vote saved.", vote_undo = "Vote removed.", vote_fail = "Could not vote: ",
     hint = "One vote per nickname; press the same button again to remove your vote.",
+    comments = "💬 COMMENTS", comments_n = "💬 COMMENTS (%d)", c_back = "← BACK", c_title = "Comments",
+    c_ph = "Write a comment...", c_send = "SEND", c_sending = "...", c_empty = "No comments yet. Write the first one!",
+    c_loading = "Loading...", c_slow = "You are typing too fast, wait a bit.", c_fail = "Could not post: ",
+    c_del = "DEL", c_del_ok = "Comment deleted.", c_del_fail = "Could not delete: ", c_you = "you", c_owner = "author",
   },
 }
 
@@ -58,7 +69,7 @@ function M.open(ctx, entry)
     if type(cb) == "function" then pcall(cb) end
   end
 
-  local u = core.ui(ctx, { name = "ScriptMenu", title = tostring(entry.name or "?"), w = 520, h = 440, order = 900, noMin = true })
+  local u = core.ui(ctx, { name = "ScriptMenu", title = tostring(entry.name or "?"), w = 520, h = 490, order = 900, noMin = true })
   if not u then return end
   local C, FNT = u.C, u.FNT
   local PAD, IW = u.PAD, u.IW
@@ -101,7 +112,9 @@ function M.open(ctx, entry)
   local goodBtn = u.pill(T("good"), PAD, 326, half, 48, false)
   local badBtn = u.pill(T("bad"), PAD + half + 12, 326, half, 48, false)
   goodBtn.TextSize, badBtn.TextSize = 13, 13
-  u.label(u.window, T("hint"), PAD, 392, IW, 30, 11, FNT.reg, C.faint, { TextWrapped = true })
+  local commentsBtn = u.pill(string.format(T("comments_n"), 0), PAD, 386, IW, 40, false)
+  commentsBtn.TextSize = 13
+  u.label(u.window, T("hint"), PAD, 438, IW, 30, 11, FNT.reg, C.faint, { TextWrapped = true })
 
   local function refreshUI()
     stats.Text = "👍 " .. good .. "    👎 " .. bad .. "    ▶ " .. uses
@@ -109,6 +122,166 @@ function M.open(ctx, entry)
     u.tw(badBtn, { BackgroundColor3 = (mine == -1) and C.danger or C.card }, 0.15)
   end
   refreshUI()
+
+  ----------------------------------------------------------
+  -- YORUMLAR (ayrı görünüm; ana menünün üstüne biner)
+  ----------------------------------------------------------
+  local ownerKey = core.nickKey(tostring(entry.author or ""))
+  local myKey = core.nickKey(nick)
+  local TRUNC = Enum.TextTruncate.AtEnd
+  local AR, AC = Enum.TextXAlignment.Right, Enum.TextXAlignment.Center
+  local CY, CH = 76, u.H - 76          -- görünümün pencere içindeki başlangıcı ve yüksekliği
+  local cv = u.new("Frame", {
+    Size = UDim2.fromOffset(u.W, CH), Position = UDim2.fromOffset(0, CY), BackgroundColor3 = C.panel,
+    BorderSizePixel = 0, Visible = false, ZIndex = 20,
+  }, u.window)
+  local cBack = u.pill(T("c_back"), PAD, 6, 110, 34, false, cv)
+  u.label(cv, T("c_title"), PAD + 124, 10, 300, 26, 18, FNT.bold, C.text, { ZIndex = 21 })
+  local cScroll = u.scroll(PAD, 52, IW, CH - 52 - 74, cv)
+  local inFrame = u.new("Frame", {
+    Size = UDim2.fromOffset(IW - 100, 48), Position = UDim2.fromOffset(PAD, CH - 60), BackgroundColor3 = C.card,
+    BorderSizePixel = 0, ClipsDescendants = true, ZIndex = 21,
+  }, cv)
+  u.round(inFrame, 10)
+  u.stroke(inFrame, C.line)
+  local inBox = u.new("TextBox", {
+    Size = UDim2.new(1, -24, 1, 0), Position = UDim2.fromOffset(12, 0), BackgroundTransparency = 1, Text = "",
+    PlaceholderText = T("c_ph"), PlaceholderColor3 = C.faint, TextColor3 = C.text, TextSize = 13, Font = FNT.reg,
+    ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 22,
+  }, inFrame)
+  local sendBtn = u.pill(T("c_send"), PAD + IW - 92, CH - 60, 92, 48, true, cv)
+
+  local comments, cLoaded, cBusy, cSending, lastSend = {}, false, false, false, 0
+  local renderComments
+
+  local function stamp(ts)
+    local ok, t = pcall(os.date, "%d.%m %H:%M", num(ts))
+    if ok and type(t) == "string" then return t end
+    return ""
+  end
+
+  local function setCount()
+    commentsBtn.Text = string.format(T("comments_n"), #comments)
+  end
+
+  local function clearComments()
+    for _, c in ipairs(cScroll:GetChildren()) do
+      if c.Name == "Row" or c.Name == "Msg" then core.safe(function() c:Destroy() end) end
+    end
+  end
+
+  local function deleteComment(cid)
+    if cBusy then return end
+    cBusy = true
+    spawn(function()
+      local ok, res = core.deleteComment(id, cid, nick, ownerKey, lang)
+      cBusy = false
+      if not u.alive() then return end
+      if ok then
+        for i, c in ipairs(comments) do
+          if num(c.id) == num(cid) then table.remove(comments, i) break end
+        end
+        setCount()
+        renderComments()
+        u.toast(T("c_del_ok"), C.ok, 3)
+      else
+        u.toast(T("c_del_fail") .. tostring(res), C.danger, 6)
+      end
+    end)
+  end
+
+  renderComments = function(placeholder)
+    clearComments()
+    if placeholder or #comments == 0 then
+      u.label(cScroll, placeholder or T("c_empty"), 0, 0, IW - 8, 60, 12, FNT.med, C.faint,
+        { Name = "Msg", TextWrapped = true, TextXAlignment = AC, ZIndex = 21 })
+      return
+    end
+    -- en yeni yorum üstte
+    for i = #comments, 1, -1 do
+      local c = comments[i]
+      local txt = tostring(c.m or "")
+      local th = core.textHeight(txt, 13, FNT.reg, IW - 8 - 28)
+      local h = math.ceil(th) + 38
+      local row = u.new("Frame", {
+        Name = "Row", Size = UDim2.fromOffset(IW - 8, h), BackgroundColor3 = C.card, BorderSizePixel = 0,
+        LayoutOrder = #comments - i + 1, ZIndex = 21,
+      }, cScroll)
+      u.round(row, 12)
+      u.stroke(row, C.line)
+      local who = tostring(c.n or "?")
+      if tostring(c.k) == myKey then who = who .. "  ·  " .. T("c_you") end
+      if tostring(c.k) == ownerKey then who = who .. "  ·  " .. T("c_owner") end
+      u.label(row, who, 12, 6, IW - 8 - 130, 16, 12, FNT.bold, u.accent, { TextTruncate = TRUNC, ZIndex = 22 })
+      u.label(row, stamp(c.t), IW - 8 - 130 - 8 - 0, 6, 70, 16, 10, FNT.med, C.faint, { TextXAlignment = AR, ZIndex = 22 })
+      u.label(row, txt, 12, 26, IW - 8 - 28, math.ceil(th), 13, FNT.reg, C.text,
+        { TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 22 })
+      if tostring(c.k) == myKey or myKey == ownerKey then
+        local db = u.pill(T("c_del"), IW - 8 - 52, 4, 44, 20, C.danger, row)
+        db.TextSize = 10
+        db.ZIndex = 23
+        db.MouseButton1Click:Connect(function() deleteComment(c.id) end)
+      end
+    end
+  end
+
+  local function loadComments(show)
+    if cBusy then return end
+    cBusy = true
+    if show then renderComments(T("c_loading")) end
+    spawn(function()
+      local list = core.readComments(id)
+      cBusy = false
+      if not u.alive() then return end
+      if #list > 0 or not cLoaded then comments = list end
+      cLoaded = true
+      setCount()
+      if cv.Visible then renderComments() end
+    end)
+  end
+
+  local function openComments()
+    cv.Visible = true
+    renderComments(cLoaded and nil or T("c_loading"))
+    loadComments(not cLoaded)
+  end
+
+  commentsBtn.MouseButton1Click:Connect(openComments)
+  cBack.MouseButton1Click:Connect(function() cv.Visible = false end)
+
+  local function sendComment()
+    if cSending then return end
+    local text = core.cleanText(core.trim(inBox.Text), 200)
+    if text == "" then return end
+    if os.clock() - lastSend < 3 then u.toast(T("c_slow"), C.muted, 2) return end
+    cSending = true
+    lastSend = os.clock()
+    sendBtn.Text = T("c_sending")
+    spawn(function()
+      local ok, res = core.addComment(id, nick, text, lang)
+      cSending = false
+      if not u.alive() then return end
+      sendBtn.Text = T("c_send")
+      if ok and type(res) == "table" then
+        inBox.Text = ""
+        comments[#comments + 1] = res
+        setCount()
+        renderComments()
+      else
+        u.toast(T("c_fail") .. tostring(res), C.danger, 8)
+      end
+    end)
+  end
+  sendBtn.MouseButton1Click:Connect(sendComment)
+  inBox.FocusLost:Connect(function(enter) if enter then sendComment() end end)
+
+  -- yorum sayısını arka planda getir
+  spawn(function()
+    local list = core.readComments(id)
+    if not u.alive() then return end
+    if not cLoaded then comments = list; cLoaded = true end
+    setCount()
+  end)
 
   -- Çalıştır
   local running = false
